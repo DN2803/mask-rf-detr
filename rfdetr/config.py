@@ -28,7 +28,7 @@ class ModelConfig(BaseModel):
     pretrain_weights: Optional[str] = None
     device: Literal["cpu", "cuda", "mps"] = DEVICE
     resolution: int = 560
-    group_detr: int = 1
+    group_detr: int = 2
     gradient_checkpointing: bool = False
 
 class RFDETRBaseConfig(ModelConfig):

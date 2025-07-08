@@ -9,7 +9,7 @@ import rfdetr.datasets.transforms as T
 
 
 def compute_multi_scale_scales(resolution, expanded_scales=False):
-    return [448,672,896]
+    return [448,672]
     if resolution == 640:
         # assume we're doing the original 640x640 and therefore patch_size is 16
         patch_size = 16
@@ -146,7 +146,7 @@ class ConvertCoco(object):
             "iscrowd": iscrowd,
             "orig_size": torch.as_tensor([int(h), int(w)]),
             "size": torch.as_tensor([int(h), int(w)]),
-            "masks": masks,  # <-- thêm field masks
+            "masks": masks.float(),  # <-- thêm field masks
         }
 
         return image, target
@@ -225,17 +225,17 @@ def make_coco_transforms_square_div_64(image_set, resolution, multi_scale=False,
 
     if image_set == 'val':
         return T.Compose([
-            T.SquareResize([resolution]),
+            T.SquareResize(scales),
             normalize,
         ])
     if image_set == 'test':
         return T.Compose([
-            T.SquareResize([resolution]),
+            T.SquareResize(scales),
             normalize,
         ])
     if image_set == 'val_speed':
         return T.Compose([
-            T.SquareResize([resolution]),
+            T.SquareResize(scales),
             normalize,
         ])
 

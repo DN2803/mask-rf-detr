@@ -468,7 +468,7 @@ class SetCriterion(nn.Module):
         # # TODO use valid to mask invalid areas due to padding in loss
         # target_masks, valid = nested_tensor_from_tensor_list(masks).decompose()
         # target_masks = target_masks.to(source_masks)
-        target_masks = torch.cat([nn.functional.interpolate(t['masks'][i][:, None], size=source_masks.shape[-2:], mode="bilinear", align_corners=False
+        target_masks = torch.cat([nn.functional.interpolate(t['masks'][i][:, None].float(), size=source_masks.shape[-2:], mode="bilinear", align_corners=False
         ) for t, (_, i) in zip(targets, indices)], dim=0)
 
 
