@@ -1,23 +1,4 @@
-# ------------------------------------------------------------------------
-# RF-DETR
-# Copyright (c) 2025 Roboflow. All Rights Reserved.
-# Licensed under the Apache License, Version 2.0 [see LICENSE for details]
-# ------------------------------------------------------------------------
-# Modified from LW-DETR (https://github.com/Atten4Vis/LW-DETR)
-# Copyright (c) 2024 Baidu. All Rights Reserved.
-# ------------------------------------------------------------------------
-# Modified from Conditional DETR (https://github.com/Atten4Vis/ConditionalDETR)
-# Copyright (c) 2021 Microsoft. All Rights Reserved.
-# ------------------------------------------------------------------------
-# Copied from DETR (https://github.com/facebookresearch/detr)
-# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
-# ------------------------------------------------------------------------
 
-"""
-COCO dataset which returns image_id for evaluation.
-
-Mostly copy-paste from https://github.com/pytorch/vision/blob/13b35ff/references/detection/coco_utils.py
-"""
 from pathlib import Path
 
 import torch
@@ -28,6 +9,7 @@ import rfdetr.datasets.transforms as T
 
 
 def compute_multi_scale_scales(resolution, expanded_scales=False):
+    return [448,672,896]
     if resolution == 640:
         # assume we're doing the original 640x640 and therefore patch_size is 16
         patch_size = 16
@@ -48,6 +30,7 @@ def compute_multi_scale_scales(resolution, expanded_scales=False):
     return proposed_scales
 
 
+
 class CocoDetection(torchvision.datasets.CocoDetection):
     def __init__(self, img_folder, ann_file, transforms):
         super(CocoDetection, self).__init__(img_folder, ann_file)
@@ -57,6 +40,7 @@ class CocoDetection(torchvision.datasets.CocoDetection):
     def __getitem__(self, idx):
         img, target = super(CocoDetection, self).__getitem__(idx)
         image_id = self.ids[idx]
+        print(target)
         target = {'image_id': image_id, 'annotations': target}
         img, target = self.prepare(img, target)
         if self._transforms is not None:
@@ -64,20 +48,62 @@ class CocoDetection(torchvision.datasets.CocoDetection):
         return img, target
 
 
-class ConvertCoco(object):
+# class ConvertCoco(object):
 
+#     def __call__(self, image, target):
+#         w, h = image.size
+
+#         image_id = target["image_id"]
+#         image_id = torch.tensor([image_id])
+
+#         anno = target["annotations"]
+
+#         anno = [obj for obj in anno if 'iscrowd' not in obj or obj['iscrowd'] == 0]
+
+#         boxes = [obj["bbox"] for obj in anno]
+#         # guard against no boxes via resizing
+#         boxes = torch.as_tensor(boxes, dtype=torch.float32).reshape(-1, 4)
+#         boxes[:, 2:] += boxes[:, :2]
+#         boxes[:, 0::2].clamp_(min=0, max=w)
+#         boxes[:, 1::2].clamp_(min=0, max=h)
+
+#         classes = [obj["category_id"] for obj in anno]
+#         classes = torch.tensor(classes, dtype=torch.int64)
+
+#         keep = (boxes[:, 3] > boxes[:, 1]) & (boxes[:, 2] > boxes[:, 0])
+#         boxes = boxes[keep]
+#         classes = classes[keep]
+
+#         target = {}
+#         target["boxes"] = boxes
+#         target["labels"] = classes
+#         target["image_id"] = image_id
+
+#         # for conversion to coco api
+#         area = torch.tensor([obj["area"] for obj in anno])
+#         iscrowd = torch.tensor([obj["iscrowd"] if "iscrowd" in obj else 0 for obj in anno])
+#         target["area"] = area[keep]
+#         target["iscrowd"] = iscrowd[keep]
+
+#         target["orig_size"] = torch.as_tensor([int(h), int(w)])
+#         target["size"] = torch.as_tensor([int(h), int(w)])
+
+#         return image, target
+
+from torchvision.ops import masks_to_boxes
+from pycocotools import mask as coco_mask
+from PIL import Image
+import numpy as np
+
+class ConvertCoco(object):
     def __call__(self, image, target):
         w, h = image.size
-
         image_id = target["image_id"]
         image_id = torch.tensor([image_id])
-
         anno = target["annotations"]
-
         anno = [obj for obj in anno if 'iscrowd' not in obj or obj['iscrowd'] == 0]
 
         boxes = [obj["bbox"] for obj in anno]
-        # guard against no boxes via resizing
         boxes = torch.as_tensor(boxes, dtype=torch.float32).reshape(-1, 4)
         boxes[:, 2:] += boxes[:, :2]
         boxes[:, 0::2].clamp_(min=0, max=w)
@@ -86,23 +112,43 @@ class ConvertCoco(object):
         classes = [obj["category_id"] for obj in anno]
         classes = torch.tensor(classes, dtype=torch.int64)
 
+        # area và iscrowd
+        area = torch.tensor([obj["area"] for obj in anno])
+        iscrowd = torch.tensor([obj["iscrowd"] if "iscrowd" in obj else 0 for obj in anno])
+
+        # convert polygon to binary mask
+        masks = []
+        for obj in anno:
+            segm = obj.get("segmentation", [])
+            rles = coco_mask.frPyObjects(segm, h, w)
+            rle = coco_mask.merge(rles)
+            mask = coco_mask.decode(rle)
+            if len(mask.shape) == 3:
+                mask = np.any(mask, axis=2)  # merge instances into one channel
+            masks.append(torch.tensor(mask, dtype=torch.uint8))
+
+        if masks:
+            masks = torch.stack(masks, dim=0)
+        else:
+            masks = torch.zeros((0, h, w), dtype=torch.uint8)
+
         keep = (boxes[:, 3] > boxes[:, 1]) & (boxes[:, 2] > boxes[:, 0])
         boxes = boxes[keep]
         classes = classes[keep]
+        area = area[keep]
+        iscrowd = iscrowd[keep]
+        masks = masks[keep]
 
-        target = {}
-        target["boxes"] = boxes
-        target["labels"] = classes
-        target["image_id"] = image_id
-
-        # for conversion to coco api
-        area = torch.tensor([obj["area"] for obj in anno])
-        iscrowd = torch.tensor([obj["iscrowd"] if "iscrowd" in obj else 0 for obj in anno])
-        target["area"] = area[keep]
-        target["iscrowd"] = iscrowd[keep]
-
-        target["orig_size"] = torch.as_tensor([int(h), int(w)])
-        target["size"] = torch.as_tensor([int(h), int(w)])
+        target = {
+            "boxes": boxes,
+            "labels": classes,
+            "image_id": image_id,
+            "area": area,
+            "iscrowd": iscrowd,
+            "orig_size": torch.as_tensor([int(h), int(w)]),
+            "size": torch.as_tensor([int(h), int(w)]),
+            "masks": masks,  # <-- thêm field masks
+        }
 
         return image, target
 
