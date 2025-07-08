@@ -101,12 +101,17 @@ class LWDETR(nn.Module):
                 [copy.deepcopy(self.class_embed) for _ in range(group_detr)])
 
         self._export = False
+        from transformers import AutoConfig
+        from transformers.models.mask2former.modeling_mask2former import Mask2FormerPixelDecoder, Mask2FormerPixelDecoderOutput
+        config = AutoConfig.from_pretrained('facebook/mask2former-swin-tiny-coco-instance')
+        config.encoder_layers=1
+        self.pixel_decoder = Mask2FormerPixelDecoder(config, feature_channels = [256,256,256])
 
     def reinitialize_detection_head(self, num_classes):
         # Create new classification head
         del self.class_embed
         self.add_module("class_embed", nn.Linear(self.transformer.d_model, num_classes))
-        
+
         # Initialize with focal loss bias adjustment
         prior_prob = 0.01
         bias_value = -math.log((1 - prior_prob) / prior_prob)
@@ -143,7 +148,12 @@ class LWDETR(nn.Module):
         """
         if isinstance(samples, (list, torch.Tensor)):
             samples = nested_tensor_from_tensor_list(samples)
+        print('samples.tensors.shape=',samples.tensors.shape)
+        torch.save(samples, 'samples.pt')
+        torch.save(targets, 'targets.pt')
         features, poss = self.backbone(samples)
+        o = self.spatial_backbone(samples.tensors)
+        decoder_output = self.pixel_decoder(o['backbone_fpn'])
 
         srcs = []
         masks = []
@@ -161,8 +171,13 @@ class LWDETR(nn.Module):
             refpoint_embed_weight = self.refpoint_embed.weight[:self.num_queries]
             query_feat_weight = self.query_feat.weight[:self.num_queries]
 
-        hs, ref_unsigmoid, hs_enc, ref_enc = self.transformer(
-            srcs, masks, poss, refpoint_embed_weight, query_feat_weight)
+        hs, ref_unsigmoid, hs_enc, ref_enc, masks_queries_logits = self.transformer(
+            srcs, masks, poss, refpoint_embed_weight, query_feat_weight,
+            pixel_embeddings=decoder_output.mask_features
+            )
+
+        # masks_queries_logits = torch.stack(masks_queries_logits, dim=1).mean(1)
+        # print('masks_queries_logits=',masks_queries_logits.shape)
 
         if self.bbox_reparam:
             outputs_coord_delta = self.bbox_embed(hs)
@@ -176,9 +191,12 @@ class LWDETR(nn.Module):
 
         outputs_class = self.class_embed(hs)
 
-        out = {'pred_logits': outputs_class[-1], 'pred_boxes': outputs_coord[-1]}
+        out = {'pred_logits': outputs_class[-1],
+        'pred_boxes': outputs_coord[-1],
+        'pred_masks': masks_queries_logits[-1],
+        }
         if self.aux_loss:
-            out['aux_outputs'] = self._set_aux_loss(outputs_class, outputs_coord)
+            out['aux_outputs'] = self._set_aux_loss(outputs_class, outputs_coord, masks_queries_logits)
 
         if self.two_stage:
             group_detr = self.group_detr if self.training else 1
@@ -188,7 +206,7 @@ class LWDETR(nn.Module):
                 cls_enc_gidx = self.transformer.enc_out_class_embed[g_idx](hs_enc_list[g_idx])
                 cls_enc.append(cls_enc_gidx)
             cls_enc = torch.cat(cls_enc, dim=1)
-            out['enc_outputs'] = {'pred_logits': cls_enc, 'pred_boxes': ref_enc}
+            out['enc_outputs'] = {'pred_logits': cls_enc, 'pred_boxes': ref_enc,'pred_masks': masks_queries_logits[-1]}
         return out
 
     def forward_export(self, tensors):
@@ -213,12 +231,16 @@ class LWDETR(nn.Module):
         return outputs_coord, outputs_class
 
     @torch.jit.unused
-    def _set_aux_loss(self, outputs_class, outputs_coord):
+    def _set_aux_loss(self, outputs_class, outputs_coord, outputs_mask):
         # this is a workaround to make torchscript happy, as torchscript
         # doesn't support dictionary with non-homogeneous values, such
         # as a dict having both a Tensor and a list.
-        return [{'pred_logits': a, 'pred_boxes': b}
-                for a, b in zip(outputs_class[:-1], outputs_coord[:-1])]
+        return [{
+          'pred_logits': a,
+          'pred_boxes': b,
+          'pred_masks': c,
+          }
+                for a, b, c in zip(outputs_class[:-1], outputs_coord[:-1], outputs_mask[:-1])]
 
     def update_drop_path(self, drop_path_rate, vit_encoder_num_layers):
         """ """
@@ -236,6 +258,26 @@ class LWDETR(nn.Module):
             if isinstance(module, nn.Dropout):
                 module.p = drop_rate
 
+
+
+
+def dice_loss(inputs, targets, num_boxes):
+    """
+    Compute the DICE loss, similar to generalized IOU for masks
+
+    Args:
+        inputs: A float tensor of arbitrary shape.
+                The predictions for each example.
+        targets: A float tensor with the same shape as inputs. Stores the binary
+                 classification label for each element in inputs (0 for the negative class and 1 for the positive
+                 class).
+    """
+    inputs = inputs.sigmoid()
+    inputs = inputs.flatten(1)
+    numerator = 2 * (inputs * targets).sum(1)
+    denominator = inputs.sum(-1) + targets.sum(-1)
+    loss = 1 - (numerator + 1) / (denominator + 1)
+    return loss.sum() / num_boxes
 
 class SetCriterion(nn.Module):
     """ This class computes the loss for Conditional DETR.
@@ -275,6 +317,7 @@ class SetCriterion(nn.Module):
         self.use_position_supervised_loss = use_position_supervised_loss
         self.ia_bce_loss = ia_bce_loss
 
+
     def loss_labels(self, outputs, targets, indices, num_boxes, log=True):
         """Classification loss (Binary focal loss)
         targets dicts must contain the key "labels" containing a tensor of dim [nb_target_boxes]
@@ -287,7 +330,7 @@ class SetCriterion(nn.Module):
 
         if self.ia_bce_loss:
             alpha = self.focal_alpha
-            gamma = 2 
+            gamma = 2
             src_boxes = outputs['pred_boxes'][idx]
             target_boxes = torch.cat([t['boxes'][i] for t, (_, i) in zip(targets, indices)], dim=0)
 
@@ -403,6 +446,56 @@ class SetCriterion(nn.Module):
         losses['loss_giou'] = loss_giou.sum() / num_boxes
         return losses
 
+
+    def loss_masks(self, outputs, targets, indices, num_boxes):
+        """
+        Compute the losses related to the masks: the focal loss and the dice loss.
+
+        Targets dicts must contain the key "masks" containing a tensor of dim [nb_target_boxes, h, w].
+        """
+        if "pred_masks" not in outputs:
+            raise KeyError("No predicted masks found in outputs")
+
+        source_idx = self._get_src_permutation_idx(indices)
+        # target_idx = torch.cat([tgt for (_, tgt) in indices])
+
+        # print('source_idx=',source_idx)
+
+        # target_idx = self._get_target_permutation_idx(indices)
+        source_masks = outputs["pred_masks"]
+        # print('source_masks=',source_masks.shape)
+        # print('source_idx=',source_idx)
+        source_masks = source_masks[source_idx]
+        # print('source_masks=',source_masks.shape)
+        # masks = [t["masks"] for t in targets]
+        # # TODO use valid to mask invalid areas due to padding in loss
+        # target_masks, valid = nested_tensor_from_tensor_list(masks).decompose()
+        # target_masks = target_masks.to(source_masks)
+        target_masks = torch.cat([t['masks'][i] for t, (_, i) in zip(targets, indices)], dim=0)
+        print('target_masks=',target_masks.shape)
+        print('source_masks=',source_masks.shape)
+
+        # target_masks = target_masks[target_idx]
+
+        # # upsample predictions to the target size
+        # source_masks = nn.functional.interpolate(
+        #     source_masks[:, None], size=target_masks.shape[-2:], mode="bilinear", align_corners=False
+        # )
+        # upsample predictions to the target size
+        target_masks = nn.functional.interpolate(
+            target_masks[:, None], size=source_masks.shape[-2:], mode="bilinear", align_corners=False
+        )
+        source_masks = source_masks[:, 0].flatten(1)
+
+
+        target_masks = target_masks.flatten(1)
+        target_masks = target_masks.view(source_masks.shape)
+        losses = {
+            "loss_mask": sigmoid_focal_loss(source_masks, target_masks, num_boxes),
+            "loss_dice": dice_loss(source_masks, target_masks, num_boxes),
+        }
+        return losses
+
     def _get_src_permutation_idx(self, indices):
         # permute predictions following indices
         batch_idx = torch.cat([torch.full_like(src, i) for i, (src, _) in enumerate(indices)])
@@ -420,6 +513,7 @@ class SetCriterion(nn.Module):
             'labels': self.loss_labels,
             'cardinality': self.loss_cardinality,
             'boxes': self.loss_boxes,
+            'masks': self.loss_masks,
         }
         assert loss in loss_map, f'do you really want to compute {loss} loss?'
         return loss_map[loss](outputs, targets, indices, num_boxes, **kwargs)
@@ -431,6 +525,7 @@ class SetCriterion(nn.Module):
              targets: list of dicts, such that len(targets) == batch_size.
                       The expected keys in each dict depends on the losses applied, see each loss' doc
         """
+        torch.save(targets, 'targets.pt')
         group_detr = self.group_detr if self.training else 1
         outputs_without_aux = {k: v for k, v in outputs.items() if k != 'aux_outputs'}
 
@@ -477,6 +572,8 @@ class SetCriterion(nn.Module):
                 losses.update(l_dict)
 
         return losses
+
+
 
 
 def sigmoid_focal_loss(inputs, targets, num_boxes, alpha: float = 0.25, gamma: float = 2):
@@ -652,14 +749,14 @@ def build_criterion_and_postprocessors(args):
             aux_weight_dict.update({k + f'_enc': v for k, v in weight_dict.items()})
         weight_dict.update(aux_weight_dict)
 
-    losses = ['labels', 'boxes', 'cardinality']
+    losses = ['labels', 'boxes', 'cardinality', 'masks']
 
     try:
         sum_group_losses = args.sum_group_losses
     except:
         sum_group_losses = False
     criterion = SetCriterion(args.num_classes + 1, matcher=matcher, weight_dict=weight_dict,
-                             focal_alpha=args.focal_alpha, losses=losses, 
+                             focal_alpha=args.focal_alpha, losses=losses,
                              group_detr=args.group_detr, sum_group_losses=sum_group_losses,
                              use_varifocal_loss = args.use_varifocal_loss,
                              use_position_supervised_loss=args.use_position_supervised_loss,
