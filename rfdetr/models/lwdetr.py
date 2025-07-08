@@ -481,10 +481,11 @@ class SetCriterion(nn.Module):
         target_masks = nn.functional.interpolate(
             target_masks[:, None], size=source_masks.shape[-2:], mode="bilinear", align_corners=False
         )
-        source_masks = source_masks[:, 0].flatten(1)
+        source_masks = source_masks.flatten(1)
+        target_masks = target_masks[:, 0].flatten(1)
+        # source_masks = source_masks[:, 0].flatten(1)
+        # target_masks = target_masks.flatten(1)
 
-
-        target_masks = target_masks.flatten(1)
         target_masks = target_masks.view(source_masks.shape)
         losses = {
             "loss_mask": sigmoid_focal_loss(source_masks, target_masks, num_boxes),
