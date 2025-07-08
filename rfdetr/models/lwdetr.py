@@ -468,7 +468,8 @@ class SetCriterion(nn.Module):
         # # TODO use valid to mask invalid areas due to padding in loss
         # target_masks, valid = nested_tensor_from_tensor_list(masks).decompose()
         # target_masks = target_masks.to(source_masks)
-        target_masks = torch.cat([t['masks'][i] for t, (_, i) in zip(targets, indices)], dim=0)
+        target_masks = torch.cat([nn.functional.interpolate(t['masks'][i][:, None], size=source_masks.shape[-2:], mode="bilinear", align_corners=False
+        ) for t, (_, i) in zip(targets, indices)], dim=0)
 
 
         # target_masks = target_masks[target_idx]
@@ -478,9 +479,9 @@ class SetCriterion(nn.Module):
         #     source_masks[:, None], size=target_masks.shape[-2:], mode="bilinear", align_corners=False
         # )
         # upsample predictions to the target size
-        target_masks = nn.functional.interpolate(
-            target_masks[:, None], size=source_masks.shape[-2:], mode="bilinear", align_corners=False
-        )
+        # target_masks = nn.functional.interpolate(
+        #     target_masks[:, None], size=source_masks.shape[-2:], mode="bilinear", align_corners=False
+        # )
         source_masks = source_masks.flatten(1)
         target_masks = target_masks[:, 0].flatten(1)
         # source_masks = source_masks[:, 0].flatten(1)
