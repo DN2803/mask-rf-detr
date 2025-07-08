@@ -396,7 +396,6 @@ class TransformerDecoder(nn.Module):
         intermediate_mask_predictions = ()
 
         intermediate_hidden_states = self.layernorm(output)
-        print('intermediate_hidden_states=',intermediate_hidden_states.shape)
         predicted_mask, attention_mask = self.mask_predictor(
             intermediate_hidden_states.transpose(0, 1), pixel_embeddings, feature_size_list[0]
         )

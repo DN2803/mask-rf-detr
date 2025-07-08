@@ -148,9 +148,6 @@ class LWDETR(nn.Module):
         """
         if isinstance(samples, (list, torch.Tensor)):
             samples = nested_tensor_from_tensor_list(samples)
-        print('samples.tensors.shape=',samples.tensors.shape)
-        torch.save(samples, 'samples.pt')
-        torch.save(targets, 'targets.pt')
         features, poss = self.backbone(samples)
         o = self.spatial_backbone(samples.tensors)
         decoder_output = self.pixel_decoder(o['backbone_fpn'])
@@ -472,8 +469,7 @@ class SetCriterion(nn.Module):
         # target_masks, valid = nested_tensor_from_tensor_list(masks).decompose()
         # target_masks = target_masks.to(source_masks)
         target_masks = torch.cat([t['masks'][i] for t, (_, i) in zip(targets, indices)], dim=0)
-        print('target_masks=',target_masks.shape)
-        print('source_masks=',source_masks.shape)
+
 
         # target_masks = target_masks[target_idx]
 
