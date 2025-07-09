@@ -199,25 +199,30 @@ class Transformer(nn.Module):
     def forward(self, srcs, masks, pos_embeds, refpoint_embed, query_feat,
 
         pixel_embeddings=None,
+        srcs2=None,
     ):
         src_flatten = []
+        src_flatten2 = []
         mask_flatten = [] if masks is not None else None
         lvl_pos_embed_flatten = []
         spatial_shapes = []
         valid_ratios = [] if masks is not None else None
-        for lvl, (src, pos_embed) in enumerate(zip(srcs, pos_embeds)):
+        for lvl, (src, pos_embed, src2) in enumerate(zip(srcs, pos_embeds, srcs2)):
             bs, c, h, w = src.shape
             spatial_shape = (h, w)
             spatial_shapes.append(spatial_shape)
 
             src = src.flatten(2).transpose(1, 2)                # bs, hw, c
+            src2 = src2.flatten(2).transpose(1, 2)                # bs, hw, c
             pos_embed = pos_embed.flatten(2).transpose(1, 2)    # bs, hw, c
             lvl_pos_embed_flatten.append(pos_embed)
             src_flatten.append(src)
+            src_flatten2.append(src2)
             if masks is not None:
                 mask = masks[lvl].flatten(1)                    # bs, hw
                 mask_flatten.append(mask)
         memory = torch.cat(src_flatten, 1)    # bs, \sum{hxw}, c
+        memory2 = torch.cat(src_flatten2, 1)    # bs, \sum{hxw}, c
         if masks is not None:
             mask_flatten = torch.cat(mask_flatten, 1)   # bs, \sum{hxw}
             valid_ratios = torch.stack([self.get_valid_ratio(m) for m in masks], 1)
@@ -293,7 +298,8 @@ class Transformer(nn.Module):
                           spatial_shapes=spatial_shapes,
                           valid_ratios=valid_ratios.to(memory.dtype) if valid_ratios is not None else valid_ratios,
 
-                          pixel_embeddings=pixel_embeddings
+                          pixel_embeddings=pixel_embeddings,
+                          memory2=memory2,
                           )
         if self.two_stage:
             if self.bbox_reparam:
@@ -359,6 +365,7 @@ class TransformerDecoder(nn.Module):
                 spatial_shapes: Optional[Tensor] = None, # bs, num_levels, 2
                 valid_ratios: Optional[Tensor] = None,
                 pixel_embeddings: Optional[Tensor] = None,
+                memory2: Optional[Tensor] = None,
 
 
                 ):
@@ -416,7 +423,8 @@ class TransformerDecoder(nn.Module):
 
             query_pos = query_pos * pos_transformation
 
-            output = layer(output, memory, tgt_mask=tgt_mask,
+            input_mem = memory if layer_id%2==0 else memory2
+            output = layer(output, input_mem, tgt_mask=tgt_mask,
                            memory_mask=memory_mask,
                            tgt_key_padding_mask=tgt_key_padding_mask,
                            memory_key_padding_mask=memory_key_padding_mask,

@@ -106,6 +106,7 @@ class LWDETR(nn.Module):
         config = AutoConfig.from_pretrained('facebook/mask2former-swin-tiny-coco-instance')
         config.encoder_layers=1
         self.pixel_decoder = Mask2FormerPixelDecoder(config, feature_channels = [256,256,256])
+        self.spatial_proj = nn.Conv2d(256, hidden_dim, kernel_size=(1, 1), stride=(1, 1))
 
     def reinitialize_detection_head(self, num_classes):
         # Create new classification head
@@ -151,12 +152,23 @@ class LWDETR(nn.Module):
         features, poss = self.backbone(samples)
         o = self.spatial_backbone(samples.tensors)
         decoder_output = self.pixel_decoder(o['backbone_fpn'])
+        # print('o[vision_features]=', o['vision_features'].shape)
+        # srcs2 = []
+        # for feat in o['backbone_fpn'][:2]:
+        #     srcs2.append(feat)
+        # srcs2 = srcs2
 
         srcs = []
+        srcs2 = []
         masks = []
         for l, feat in enumerate(features):
             src, mask = feat.decompose()
+            src2 = nn.functional.interpolate(o['backbone_fpn'][l], size=src.shape[-2:], mode="bilinear", align_corners=False)
+            src2 = self.spatial_proj(src2)
+            # print('src=', src.shape)
+            # print('src2=', src2.shape)
             srcs.append(src)
+            srcs2.append(src2)
             masks.append(mask)
             assert mask is not None
 
@@ -170,7 +182,8 @@ class LWDETR(nn.Module):
 
         hs, ref_unsigmoid, hs_enc, ref_enc, masks_queries_logits = self.transformer(
             srcs, masks, poss, refpoint_embed_weight, query_feat_weight,
-            pixel_embeddings=decoder_output.mask_features
+            pixel_embeddings=decoder_output.mask_features,
+            srcs2=srcs2,
             )
 
         # masks_queries_logits = torch.stack(masks_queries_logits, dim=1).mean(1)

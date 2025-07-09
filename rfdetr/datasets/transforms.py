@@ -888,7 +888,7 @@ class SquareResize(object):
                 boxes[:, [1, 3]] *= size / h0
                 target["boxes"] = boxes
                 target["size"] = torch.tensor([size, size])
-            if "masks" in target:
+            if "masks" in target and len(target["masks"]) != 0:
                 # Resize segmentation masks if any
                 target["masks"] = torch.nn.functional.interpolate(
                     target["masks"].unsqueeze(0).float(), size=(size, size), mode="nearest"
