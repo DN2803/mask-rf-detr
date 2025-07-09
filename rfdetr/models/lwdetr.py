@@ -104,9 +104,12 @@ class LWDETR(nn.Module):
         from transformers import AutoConfig
         from transformers.models.mask2former.modeling_mask2former import Mask2FormerPixelDecoder, Mask2FormerPixelDecoderOutput
         config = AutoConfig.from_pretrained('facebook/mask2former-swin-tiny-coco-instance')
-        config.encoder_layers=1
+        config.encoder_layers=3
         self.pixel_decoder = Mask2FormerPixelDecoder(config, feature_channels = [256,256,256])
-        self.spatial_proj = nn.Conv2d(256, hidden_dim, kernel_size=(1, 1), stride=(1, 1))
+        self.spatial_proj = nn.Conv2d(hidden_dim, 256, kernel_size=(1, 1), stride=(1, 1))
+        # self.spatial_proj = nn.Conv2d(256, hidden_dim, kernel_size=(1, 1), stride=(1, 1))
+        # self.pixel_layernorm = nn.LayerNorm(256)
+        self.pixel_layernorm = nn.BatchNorm2d(256)  # giống LayerNorm theo channel
 
     def reinitialize_detection_head(self, num_classes):
         # Create new classification head
@@ -150,8 +153,7 @@ class LWDETR(nn.Module):
         if isinstance(samples, (list, torch.Tensor)):
             samples = nested_tensor_from_tensor_list(samples)
         features, poss = self.backbone(samples)
-        o = self.spatial_backbone(samples.tensors)
-        decoder_output = self.pixel_decoder(o['backbone_fpn'])
+        # o = self.spatial_backbone(samples.tensors)
         # print('o[vision_features]=', o['vision_features'].shape)
         # srcs2 = []
         # for feat in o['backbone_fpn'][:2]:
@@ -163,15 +165,24 @@ class LWDETR(nn.Module):
         masks = []
         for l, feat in enumerate(features):
             src, mask = feat.decompose()
-            src2 = nn.functional.interpolate(o['backbone_fpn'][l], size=src.shape[-2:], mode="bilinear", align_corners=False)
-            src2 = self.spatial_proj(src2)
+            # src2 = nn.functional.interpolate(o['backbone_fpn'][l], size=src.shape[-2:], mode="bilinear", align_corners=False)
+            src2 = self.spatial_proj(src)
+            # src2 = self.pixel_layernorm(src2)
+            # self.pixel_layernorm
             # print('src=', src.shape)
-            # print('src2=', src2.shape)
+            # print('src2=', src2)
             srcs.append(src)
             srcs2.append(src2)
             masks.append(mask)
             assert mask is not None
+        # srcs2 = srcs
 
+        # torch.save(srcs2, 'srcs2.pt')
+        # raise 'sdfd'
+        decoder_output = self.pixel_decoder(srcs2+[srcs2[-1]])
+        # decoder_output = self.pixel_decoder(o['backbone_fpn'])
+        # print('decoder_output.mask_features=', decoder_output.mask_features)
+        # raise 'sdfdf'
         if self.training:
             refpoint_embed_weight = self.refpoint_embed.weight
             query_feat_weight = self.query_feat.weight
@@ -183,7 +194,7 @@ class LWDETR(nn.Module):
         hs, ref_unsigmoid, hs_enc, ref_enc, masks_queries_logits = self.transformer(
             srcs, masks, poss, refpoint_embed_weight, query_feat_weight,
             pixel_embeddings=decoder_output.mask_features,
-            srcs2=srcs2,
+            srcs2=srcs,
             )
 
         # masks_queries_logits = torch.stack(masks_queries_logits, dim=1).mean(1)
@@ -473,6 +484,7 @@ class SetCriterion(nn.Module):
 
         # target_idx = self._get_target_permutation_idx(indices)
         source_masks = outputs["pred_masks"]
+        # print('source_masks=', source_masks)
         # print('source_masks=',source_masks.shape)
         # print('source_idx=',source_idx)
         source_masks = source_masks[source_idx]
@@ -500,11 +512,17 @@ class SetCriterion(nn.Module):
         # source_masks = source_masks[:, 0].flatten(1)
         # target_masks = target_masks.flatten(1)
 
+        # print('source_masks=', source_masks)
+        # print('target_masks=', target_masks)
+
         target_masks = target_masks.view(source_masks.shape)
         losses = {
             "loss_mask": sigmoid_focal_loss(source_masks, target_masks, num_boxes),
             "loss_dice": dice_loss(source_masks, target_masks, num_boxes),
         }
+        # print('losses=', losses)
+        # raise 'sdfsdf'
+
         return losses
 
     def _get_src_permutation_idx(self, indices):
@@ -749,7 +767,12 @@ def build_model(args):
 def build_criterion_and_postprocessors(args):
     device = torch.device(args.device)
     matcher = build_matcher(args)
-    weight_dict = {'loss_ce': args.cls_loss_coef, 'loss_bbox': args.bbox_loss_coef}
+    weight_dict = {
+      'loss_ce': args.cls_loss_coef, 
+      'loss_bbox': args.bbox_loss_coef,
+      'loss_dice': 1,
+      'loss_mask': 2,
+    }
     weight_dict['loss_giou'] = args.giou_loss_coef
     # TODO this is a hack
     if args.aux_loss:

@@ -124,6 +124,10 @@ class Model:
                 if any(name.endswith(x) for x in query_param_names):
                     checkpoint['model'][name] = state[:num_desired_queries]
 
+            # current_model_dict = self.model.state_dict()
+
+            # new_state_dict={k:v if v.size()==current_model_dict[k].size()  else  current_model_dict[k] for k,v in zip(current_model_dict.keys(), checkpoint['model'].values())}
+            # self.model.load_state_dict(new_state_dict, strict=False)
             self.model.load_state_dict(checkpoint['model'], strict=False)
 
         if args.backbone_lora:
