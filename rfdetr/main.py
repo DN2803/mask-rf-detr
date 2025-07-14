@@ -124,12 +124,20 @@ class Model:
                 if any(name.endswith(x) for x in query_param_names):
                     checkpoint['model'][name] = state[:num_desired_queries]
 
-            # current_model_dict = self.model.state_dict()
+            # self.model.load_state_dict(checkpoint['model'], strict=False)
+            
+            new_state_dict = checkpoint["model"]
+            current_model_dict = self.model.state_dict()
+            new_state_dict = {k.replace("module.", ""): v for k, v in new_state_dict.items()}
+            compatible_state_dict = {
+                k: v for k, v in new_state_dict.items()
+                if k in current_model_dict and v.size() == current_model_dict[k].size()
+            }
+            current_model_dict.update(compatible_state_dict)
+            missing, unexpected = self.model.load_state_dict(current_model_dict, strict=False)
+            
 
-            # new_state_dict={k:v if v.size()==current_model_dict[k].size()  else  current_model_dict[k] for k,v in zip(current_model_dict.keys(), checkpoint['model'].values())}
-            # self.model.load_state_dict(new_state_dict, strict=False)
-            self.model.load_state_dict(checkpoint['model'], strict=False)
-
+            
         if args.backbone_lora:
             print("Applying LORA to backbone")
             lora_config = LoraConfig(
@@ -318,6 +326,22 @@ class Model:
                 args.drop_path, args.epochs, num_training_steps_per_epoch,
                 args.cutoff_epoch, args.drop_mode, args.drop_schedule)
             print("Min DP = %.7f, Max DP = %.7f" % (min(schedules['dp']), max(schedules['dp'])))
+
+        # current_model_dict = torch.load('/content/checkpoint_best_regular_wall_detector_11_07_25.pth', weights_only=False)
+        # self.model.model.load_state_dict(model.model.model.state_dict())
+        
+        
+        # new_state_dict = torch.load('/content/mask-rf-detr_coco_140725_v5.pt', weights_only=False)
+        # current_model_dict = self.model.state_dict()
+        # new_state_dict = {k.replace("module.", ""): v for k, v in new_state_dict.items()}
+        # compatible_state_dict = {
+        #     k: v for k, v in new_state_dict.items()
+        #     if k in current_model_dict and v.size() == current_model_dict[k].size()
+        # }
+        # current_model_dict.update(compatible_state_dict)
+        # missing, unexpected = self.model.load_state_dict(current_model_dict, strict=False)
+        
+
 
         print("Start training")
         start_time = time.time()
@@ -600,9 +624,13 @@ if __name__ == '__main__':
             "set_cost_class",
             "set_cost_bbox",
             "set_cost_giou",
+            "set_cost_mask",
+            "set_cost_dice",
             "cls_loss_coef",
             "bbox_loss_coef",
             "giou_loss_coef",
+            "mask_loss_coef",
+            "dice_loss_coef",
             "focal_alpha",
             "aux_loss",
             "sum_group_losses",
@@ -646,7 +674,7 @@ if __name__ == '__main__':
 
 def get_args_parser():
     parser = argparse.ArgumentParser('Set transformer detector', add_help=False)
-    parser.add_argument('--num_classes', default=2, type=int)
+    parser.add_argument('--num_classes', default=10, type=int)
     parser.add_argument('--grad_accum_steps', default=1, type=int)
     parser.add_argument('--amp', default=False, type=bool)
     parser.add_argument('--lr', default=1e-4, type=float)
@@ -735,11 +763,17 @@ def get_args_parser():
                         help="L1 box coefficient in the matching cost")
     parser.add_argument('--set_cost_giou', default=2, type=float,
                         help="giou box coefficient in the matching cost")
+    parser.add_argument('--set_cost_mask', default=2, type=float,
+                        help="giou box coefficient in the matching cost")
+    parser.add_argument('--set_cost_dice', default=2, type=float,
+                        help="giou box coefficient in the matching cost")
 
     # * Loss coefficients
     parser.add_argument('--cls_loss_coef', default=2, type=float)
     parser.add_argument('--bbox_loss_coef', default=5, type=float)
     parser.add_argument('--giou_loss_coef', default=2, type=float)
+    parser.add_argument('--mask_loss_coef', default=2, type=float)
+    parser.add_argument('--dice_loss_coef', default=2, type=float)
     parser.add_argument('--focal_alpha', default=0.25, type=float)
     
     # Loss
@@ -894,11 +928,15 @@ def populate_args(
     set_cost_class=2,
     set_cost_bbox=5,
     set_cost_giou=2,
+    set_cost_mask=2,
+    set_cost_dice=2,
     
     # Loss coefficients
     cls_loss_coef=2,
     bbox_loss_coef=5,
     giou_loss_coef=2,
+    mask_loss_coef=2,
+    dice_loss_coef=2,
     focal_alpha=0.25,
     aux_loss=True,
     sum_group_losses=False,
@@ -1006,9 +1044,13 @@ def populate_args(
         set_cost_class=set_cost_class,
         set_cost_bbox=set_cost_bbox,
         set_cost_giou=set_cost_giou,
+        set_cost_mask=set_cost_mask,
+        set_cost_dice=set_cost_dice,
         cls_loss_coef=cls_loss_coef,
         bbox_loss_coef=bbox_loss_coef,
         giou_loss_coef=giou_loss_coef,
+        mask_loss_coef=mask_loss_coef,
+        dice_loss_coef=dice_loss_coef,
         focal_alpha=focal_alpha,
         aux_loss=aux_loss,
         sum_group_losses=sum_group_losses,

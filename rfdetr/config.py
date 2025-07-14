@@ -4,6 +4,7 @@
 # Licensed under the Apache License, Version 2.0 [see LICENSE for details]
 # ------------------------------------------------------------------------
 
+
 from pydantic import BaseModel
 from typing import List, Optional, Literal, Type
 import torch
@@ -12,7 +13,7 @@ DEVICE = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is
 class ModelConfig(BaseModel):
     encoder: Literal["dinov2_windowed_small", "dinov2_windowed_base"]
     out_feature_indexes: List[int]
-    dec_layers: int = 3
+    dec_layers: int = 5
     two_stage: bool = True
     projector_scale: List[Literal["P3", "P4", "P5"]]
     hidden_dim: int
@@ -23,11 +24,11 @@ class ModelConfig(BaseModel):
     lite_refpoint_refine: bool = True
     layer_norm: bool = True
     amp: bool = True
-    num_classes: int = 90
+    num_classes: int = 10
     pretrain_weights: Optional[str] = None
     device: Literal["cpu", "cuda", "mps"] = DEVICE
     resolution: int = 560
-    group_detr: int = 13
+    group_detr: int = 9
     gradient_checkpointing: bool = False
 
 class RFDETRBaseConfig(ModelConfig):
@@ -52,8 +53,8 @@ class RFDETRLargeConfig(RFDETRBaseConfig):
     pretrain_weights: Optional[str] = "rf-detr-large.pth"
 
 class TrainConfig(BaseModel):
-    lr: float = 5e-5
-    lr_encoder: float = 7e-5
+    lr: float = 1e-4
+    lr_encoder: float = 8e-5
     batch_size: int = 4
     grad_accum_steps: int = 4
     epochs: int = 100

@@ -131,7 +131,7 @@ class Transformer(nn.Module):
     def __init__(self, d_model=512, sa_nhead=8, ca_nhead=8, num_queries=300,
                  num_decoder_layers=6, dim_feedforward=2048, dropout=0.0,
                  activation="relu", normalize_before=False,
-                 return_intermediate_dec=False, group_detr=1,
+                 return_intermediate_dec=False, group_detr=1, 
                  two_stage=False,
                  num_feature_levels=4, dec_n_points=4,
                  lite_refpoint_refine=False,
@@ -141,13 +141,13 @@ class Transformer(nn.Module):
         self.encoder = None
 
         decoder_layer = TransformerDecoderLayer(d_model, sa_nhead, ca_nhead, dim_feedforward,
-                                                dropout, activation, normalize_before,
+                                                dropout, activation, normalize_before, 
                                                 group_detr=group_detr,
                                                 num_feature_levels=num_feature_levels,
                                                 dec_n_points=dec_n_points,
                                                 skip_self_attn=False,)
         assert decoder_norm_type in ['LN', 'Identity']
-        norm = {
+        norm = { 
             "LN": lambda channels: nn.LayerNorm(channels),
             "Identity": lambda channels: nn.Identity(),
         }
@@ -158,8 +158,8 @@ class Transformer(nn.Module):
                                           d_model=d_model,
                                           lite_refpoint_refine=lite_refpoint_refine,
                                           bbox_reparam=bbox_reparam)
-
-
+        
+        
         self.two_stage = two_stage
         if two_stage:
             self.enc_output = nn.ModuleList([nn.Linear(d_model, d_model) for _ in range(group_detr)])
@@ -175,7 +175,7 @@ class Transformer(nn.Module):
         self.bbox_reparam = bbox_reparam
 
         self._export = False
-
+    
     def export(self):
         self._export = True
 
@@ -186,7 +186,7 @@ class Transformer(nn.Module):
         for m in self.modules():
             if isinstance(m, MSDeformAttn):
                 m._reset_parameters()
-
+    
     def get_valid_ratio(self, mask):
         _, H, W = mask.shape
         valid_H = torch.sum(~mask[:, :, 0], 1)
@@ -196,11 +196,7 @@ class Transformer(nn.Module):
         valid_ratio = torch.stack([valid_ratio_w, valid_ratio_h], -1)
         return valid_ratio
 
-    def forward(self, srcs, masks, pos_embeds, refpoint_embed, query_feat,
-
-        pixel_embeddings=None,
-        srcs2=None,
-    ):
+    def forward(self, srcs, masks, pos_embeds, refpoint_embed, query_feat, pixel_embeddings=None, srcs2=None,):
         src_flatten = []
         src_flatten2 = []
         mask_flatten = [] if masks is not None else None
@@ -221,15 +217,15 @@ class Transformer(nn.Module):
             if masks is not None:
                 mask = masks[lvl].flatten(1)                    # bs, hw
                 mask_flatten.append(mask)
-        memory = torch.cat(src_flatten, 1)    # bs, \sum{hxw}, c
-        memory2 = torch.cat(src_flatten2, 1)    # bs, \sum{hxw}, c
+        memory = torch.cat(src_flatten, 1)    # bs, \sum{hxw}, c 
+        memory2 = torch.cat(src_flatten2, 1)    # bs, \sum{hxw}, c 
         if masks is not None:
             mask_flatten = torch.cat(mask_flatten, 1)   # bs, \sum{hxw}
             valid_ratios = torch.stack([self.get_valid_ratio(m) for m in masks], 1)
-        lvl_pos_embed_flatten = torch.cat(lvl_pos_embed_flatten, 1) # bs, \sum{hxw}, c
+        lvl_pos_embed_flatten = torch.cat(lvl_pos_embed_flatten, 1) # bs, \sum{hxw}, c 
         spatial_shapes = torch.as_tensor(spatial_shapes, dtype=torch.long, device=memory.device)
         level_start_index = torch.cat((spatial_shapes.new_zeros((1, )), spatial_shapes.prod(1).cumsum(0)[:-1]))
-
+        
         if self.two_stage:
             output_memory, output_proposals = gen_encoder_output_proposals(
                 memory, mask_flatten, spatial_shapes, unsigmoid=not self.bbox_reparam)
@@ -238,7 +234,7 @@ class Transformer(nn.Module):
             group_detr = self.group_detr if self.training else 1
             for g_idx in range(group_detr):
                 output_memory_gidx = self.enc_output_norm[g_idx](self.enc_output[g_idx](output_memory))
-
+    
                 enc_outputs_class_unselected_gidx = self.enc_out_class_embed[g_idx](output_memory_gidx)
                 if self.bbox_reparam:
                     enc_outputs_coord_delta_gidx = self.enc_out_bbox_embed[g_idx](output_memory_gidx)
@@ -253,16 +249,16 @@ class Transformer(nn.Module):
 
                 topk = min(self.num_queries, enc_outputs_class_unselected_gidx.shape[-2])
                 topk_proposals_gidx = torch.topk(enc_outputs_class_unselected_gidx.max(-1)[0], topk, dim=1)[1] # bs, nq
-
+                
                 refpoint_embed_gidx_undetach = torch.gather(
                     enc_outputs_coord_unselected_gidx, 1, topk_proposals_gidx.unsqueeze(-1).repeat(1, 1, 4)) # unsigmoid
                 # for decoder layer, detached as initial ones, (bs, nq, 4)
                 refpoint_embed_gidx = refpoint_embed_gidx_undetach.detach()
-
+                
                 # get memory tgt
                 tgt_undetach_gidx = torch.gather(
                     output_memory_gidx, 1, topk_proposals_gidx.unsqueeze(-1).repeat(1, 1, self.d_model))
-
+                
                 refpoint_embed_ts.append(refpoint_embed_gidx)
                 memory_ts.append(tgt_undetach_gidx)
                 boxes_ts.append(refpoint_embed_gidx_undetach)
@@ -271,7 +267,7 @@ class Transformer(nn.Module):
             # (bs, nq, d)
             memory_ts = torch.cat(memory_ts, dim=1)#.transpose(0, 1)
             boxes_ts = torch.cat(boxes_ts, dim=1)#.transpose(0, 1)
-
+        
         tgt = query_feat.unsqueeze(0).repeat(bs, 1, 1)
         refpoint_embed = refpoint_embed.unsqueeze(0).repeat(bs, 1, 1)
         if self.two_stage:
@@ -288,19 +284,17 @@ class Transformer(nn.Module):
                 )
             else:
                 refpoint_embed_ts_subset = refpoint_embed_ts_subset + refpoint_embed_ts
-
+            
             refpoint_embed = torch.concat(
                 [refpoint_embed_ts_subset, refpoint_embed_subset], dim=-2)
 
-        (hs, references),intermediate_mask_predictions = self.decoder(tgt, memory, memory_key_padding_mask=mask_flatten,
+        (hs, references), intermediate_mask_predictions = self.decoder(tgt, memory, memory_key_padding_mask=mask_flatten,
                           pos=lvl_pos_embed_flatten, refpoints_unsigmoid=refpoint_embed,
-                          level_start_index=level_start_index,
+                          level_start_index=level_start_index, 
                           spatial_shapes=spatial_shapes,
                           valid_ratios=valid_ratios.to(memory.dtype) if valid_ratios is not None else valid_ratios,
-
-                          pixel_embeddings=pixel_embeddings,
-                          memory2=memory2,
-                          )
+                        pixel_embeddings=pixel_embeddings,
+                        memory2=memory2,)
         if self.two_stage:
             if self.bbox_reparam:
                 return hs, references, memory_ts, boxes_ts, intermediate_mask_predictions
@@ -314,7 +308,7 @@ class TransformerDecoder(nn.Module):
     def __init__(self,
                  decoder_layer,
                  num_layers,
-                 norm=None,
+                 norm=None, 
                  return_intermediate=False,
                  d_model=256,
                  lite_refpoint_refine=False,
@@ -366,29 +360,27 @@ class TransformerDecoder(nn.Module):
                 valid_ratios: Optional[Tensor] = None,
                 pixel_embeddings: Optional[Tensor] = None,
                 memory2: Optional[Tensor] = None,
-
-
                 ):
         output = tgt
 
         intermediate = []
         hs_refpoints_unsigmoid = [refpoints_unsigmoid]
-
+        
         def get_reference(refpoints):
             # [num_queries, batch_size, 4]
             obj_center = refpoints[..., :4]
-
+            
             if self._export:
-                query_sine_embed = gen_sineembed_for_position(obj_center, self.d_model / 2) # bs, nq, 256*2
+                query_sine_embed = gen_sineembed_for_position(obj_center, self.d_model / 2) # bs, nq, 256*2 
                 refpoints_input = obj_center[:, :, None] # bs, nq, 1, 4
             else:
                 refpoints_input = obj_center[:, :, None] \
                                         * torch.cat([valid_ratios, valid_ratios], -1)[:, None] # bs, nq, nlevel, 4
                 query_sine_embed = gen_sineembed_for_position(
-                    refpoints_input[:, :, 0, :], self.d_model / 2) # bs, nq, 256*2
+                    refpoints_input[:, :, 0, :], self.d_model / 2) # bs, nq, 256*2 
             query_pos = self.ref_point_head(query_sine_embed)
             return obj_center, refpoints_input, query_pos, query_sine_embed
-
+        
         # always use init refpoints
         if self.lite_refpoint_refine:
             if self.bbox_reparam:
@@ -396,20 +388,10 @@ class TransformerDecoder(nn.Module):
             else:
                 obj_center, refpoints_input, query_pos, query_sine_embed = get_reference(refpoints_unsigmoid.sigmoid())
 
-
         mask_size = pixel_embeddings.shape[-1]
         feature_size_list = [(mask_size//i, mask_size//i) for i in range(1,3+1)]
-
         intermediate_mask_predictions = ()
-
-        intermediate_hidden_states = self.layernorm(output)
-        predicted_mask, attention_mask = self.mask_predictor(
-            intermediate_hidden_states.transpose(0, 1), pixel_embeddings, feature_size_list[0]
-        )
-        intermediate_mask_predictions += (predicted_mask,)
-
-
-
+        
         for layer_id, layer in enumerate(self.layers):
             # iter refine each layer
             if not self.lite_refpoint_refine:
@@ -422,21 +404,18 @@ class TransformerDecoder(nn.Module):
             pos_transformation = 1
 
             query_pos = query_pos * pos_transformation
-
             input_mem = memory if layer_id%2==0 else memory2
             output = layer(output, input_mem, tgt_mask=tgt_mask,
                            memory_mask=memory_mask,
                            tgt_key_padding_mask=tgt_key_padding_mask,
                            memory_key_padding_mask=memory_key_padding_mask,
-                           pos=pos, query_pos=query_pos, query_sine_embed=query_sine_embed,
+                           pos=pos, query_pos=query_pos, query_sine_embed=query_sine_embed, 
                            is_first=(layer_id == 0),
                            reference_points=refpoints_input,
                            spatial_shapes=spatial_shapes,
                            level_start_index=level_start_index)
-
-
+            
             intermediate_hidden_states = self.layernorm(output)
-
             predicted_mask, attention_mask = self.mask_predictor(
                 intermediate_hidden_states.transpose(0, 1),
                 pixel_embeddings,
@@ -478,7 +457,7 @@ class TransformerDecoder(nn.Module):
                 ], intermediate_mask_predictions
             else:
                 return [
-                    torch.stack(intermediate),
+                    torch.stack(intermediate), 
                     refpoints_unsigmoid.unsqueeze(0)
                 ], intermediate_mask_predictions
 
@@ -488,8 +467,8 @@ class TransformerDecoder(nn.Module):
 class TransformerDecoderLayer(nn.Module):
 
     def __init__(self, d_model, sa_nhead, ca_nhead, dim_feedforward=2048, dropout=0.1,
-                 activation="relu", normalize_before=False, group_detr=1,
-                 num_feature_levels=4, dec_n_points=4,
+                 activation="relu", normalize_before=False, group_detr=1, 
+                 num_feature_levels=4, dec_n_points=4, 
                  skip_self_attn=False):
         super().__init__()
         # Decoder Self-Attention
@@ -510,7 +489,7 @@ class TransformerDecoderLayer(nn.Module):
 
         self.norm2 = nn.LayerNorm(d_model)
         self.norm3 = nn.LayerNorm(d_model)
-
+        
         self.dropout2 = nn.Dropout(dropout)
         self.dropout3 = nn.Dropout(dropout)
 
@@ -535,7 +514,7 @@ class TransformerDecoderLayer(nn.Module):
                      level_start_index=None,
                      ):
         bs, num_queries, _ = tgt.shape
-
+        
         # ========== Begin of Self-Attention =============
         # Apply projections here
         # shape: batch_size x num_queries x 256
@@ -549,7 +528,7 @@ class TransformerDecoderLayer(nn.Module):
         tgt2 = self.self_attn(q, k, v, attn_mask=tgt_mask,
                             key_padding_mask=tgt_key_padding_mask,
                             need_weights=False)[0]
-
+        
         if self.training:
             tgt2 = torch.cat(tgt2.split(bs, dim=0), dim=1)
         # ========== End of Self-Attention =============
@@ -588,7 +567,7 @@ class TransformerDecoderLayer(nn.Module):
                 spatial_shapes=None,
                 level_start_index=None):
         return self.forward_post(tgt, memory, tgt_mask, memory_mask,
-                                 tgt_key_padding_mask, memory_key_padding_mask, pos, query_pos,
+                                 tgt_key_padding_mask, memory_key_padding_mask, pos, query_pos, 
                                  query_sine_embed, is_first,
                                  reference_points, spatial_shapes, level_start_index)
 
@@ -598,7 +577,7 @@ def _get_clones(module, N):
 
 
 def build_transformer(args):
-
+    
     try:
         two_stage = args.two_stage
     except:
