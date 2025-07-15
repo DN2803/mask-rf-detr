@@ -288,16 +288,17 @@ class RFDETR:
             scores = result["scores"]
             labels = result["labels"]
             boxes = result["boxes"]
-
+            masks = result["masks"].squeeze(1)
             keep = scores > threshold
             scores = scores[keep]
             labels = labels[keep]
             boxes = boxes[keep]
-
+            masks = masks[keep]
             detections = sv.Detections(
                 xyxy=boxes.float().cpu().numpy(),
                 confidence=scores.float().cpu().numpy(),
                 class_id=labels.cpu().numpy(),
+                mask=masks.cpu().numpy(),
             )
             detections_list.append(detections)
 
