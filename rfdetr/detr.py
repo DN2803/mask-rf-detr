@@ -278,6 +278,7 @@ class RFDETR:
                 }
             target_sizes = torch.tensor(orig_sizes, device=self.model.device)
             results = self.model.postprocessors["bbox"](predictions, target_sizes=target_sizes)
+            results = self.model.postprocessors["segm"](results, target_sizes=target_sizes) 
 
         detections_list = []
         for result in results:
