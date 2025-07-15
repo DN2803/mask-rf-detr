@@ -179,7 +179,7 @@ class LWDETR(nn.Module):
 
         # torch.save(srcs2, 'srcs2.pt')
         # raise 'sdfd'
-        decoder_output = self.pixel_decoder(srcs2+[srcs2[-1]])
+        decoder_output = self.pixel_decoder(srcs2+[srcs2[-1]]+[srcs2[-1]])
         # decoder_output = self.pixel_decoder(o['backbone_fpn'])
         # print('decoder_output.mask_features=', decoder_output.mask_features)
         # raise 'sdfdf'
