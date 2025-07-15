@@ -289,6 +289,9 @@ class RFDETR:
             labels = result["labels"]
             boxes = result["boxes"]
             masks = result["masks"].squeeze(1)
+            masks = masks.to(scores.device)
+            
+
             keep = scores > threshold
             scores = scores[keep]
             labels = labels[keep]
