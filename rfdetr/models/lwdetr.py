@@ -727,7 +727,7 @@ class PostProcess(nn.Module):
                 )
                 
                 # Clear intermediate mask tensors
-                del masks_per_image, masks, mask_indices
+                # del masks_per_image, masks, mask_indices
 
             results.append(result)
             
