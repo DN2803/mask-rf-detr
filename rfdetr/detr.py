@@ -278,9 +278,8 @@ class RFDETR:
                 }
             target_sizes = torch.tensor(orig_sizes, device=self.model.device)
             results = self.model.postprocessors["bbox"](predictions, target_sizes=target_sizes)
-            print("resultsbb", results)
-            orig_target_sizes = target_sizes
-            results = self.model.postprocessors['segm'](results, predictions, orig_target_sizes, target_sizes)
+
+            results = self.model.postprocessors['segm'](results, predictions, target_sizes=target_sizes)
             print("resultssgm", results)
 
         detections_list = []
@@ -288,24 +287,34 @@ class RFDETR:
             scores = result["scores"]
             labels = result["labels"]
             boxes = result["boxes"]
-            masks = result["masks"].squeeze(1)
-            masks = masks.to(scores.device)
-            
+
+            # Extract masks if they are present in the results
+            masks = result.get("masks", None)
 
             keep = scores > threshold
             scores = scores[keep]
             labels = labels[keep]
             boxes = boxes[keep]
-            masks = masks[keep]
+
+            if masks is not None:
+                masks = masks[keep]
+                # Convert masks to numpy array with shape (n, H, W)
+                mask_array = masks.cpu().numpy() if masks is not None else None
+            else:
+                mask_array = None
+
             detections = sv.Detections(
-                xyxy=boxes.float().cpu().numpy(),
-                confidence=scores.float().cpu().numpy(),
+                xyxy=boxes.cpu().numpy(),
+                confidence=scores.cpu().numpy(),
                 class_id=labels.cpu().numpy(),
-                mask=masks.cpu().numpy(),
+                mask=mask_array,
             )
             detections_list.append(detections)
 
-        return detections_list if len(detections_list) > 1 else detections_list[0]
+        if len(detections_list) == 1:
+            return detections_list[0]
+        else:
+            return detections_list
 
 
 class RFDETRBase(RFDETR):
