@@ -300,7 +300,7 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, arg
 
         orig_target_sizes = torch.stack([t["orig_size"] for t in targets], dim=0)
         results = postprocessors["bbox"](outputs, orig_target_sizes)
-        if "segm" in postprocessors and "masks" in outputs:
+        if "segm" in postprocessors:
             seg_results = postprocessors["segm"](results, outputs, orig_target_sizes)
             results['masks'] = [
                 t["masks"] for t in seg_results
