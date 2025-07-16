@@ -301,10 +301,13 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, arg
         orig_target_sizes = torch.stack([t["orig_size"] for t in targets], dim=0)
         results = postprocessors["bbox"](outputs, orig_target_sizes)
         if "segm" in postprocessors and "masks" in outputs:
-            # target_segments = [
-            #     t["segmentation"] for t in targets
-            # ]  # [num_targets, num_points, 2]
-            pass
+            seg_results = postprocessors["segm"](results, outputs, orig_target_sizes)
+            results['masks'] = [
+                t["masks"] for t in targets
+            ]  # [num_targets, num_points, 2
+            # pass
+
+
         res = {
             target["image_id"].item(): output
             for target, output in zip(targets, results)

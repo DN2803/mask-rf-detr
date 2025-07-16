@@ -699,41 +699,8 @@ class PostProcess(nn.Module):
         scale_fct = torch.stack([img_w, img_h, img_w, img_h], dim=1)
         boxes = boxes * scale_fct[:, None, :]
 
-        results = []
-
-        for i, (s, lbl, b) in enumerate(zip(scores, labels, boxes)):
-            result = {"scores": s.float(), "labels": lbl, "boxes": b}
-
-            # Include mask predictions if available
-            if out_mask is not None:
-                # Get the top-k masks for this image
-                masks_per_image = out_mask[i]
-                
-                # More memory-efficient gathering
-                mask_indices = topk_boxes[i].unsqueeze(-1).unsqueeze(-1).expand(-1, 28, 28)
-                masks = masks_per_image.gather(0, mask_indices)
-                
-                # Apply sigmoid before resizing for better numerical stability
-                masks = masks.sigmoid()
-                
-                # Resize masks with optimized parameters
-                result["masks"] = batch_resize_masks(
-                    masks,
-                    int(img_h[i].item()),
-                    int(img_w[i].item()),
-                    batch_size=8,  # Smaller batch size for better memory efficiency
-                    apply_threshold=0.5,  # Apply threshold to get binary masks
-                )
-                
-                # Clear intermediate mask tensors
-                del masks_per_image, masks, mask_indices
-
-            results.append(result)
-            
-            # Clear cache less frequently for large batches
-            if i > 0 and i % 8 == 0:
-                torch.cuda.empty_cache()
-        # results = [{'scores': s, 'labels': l, 'boxes': b} for s, l, b in zip(scores, labels, boxes)]
+        
+        results = [{'scores': s, 'labels': l, 'boxes': b} for s, l, b in zip(scores, labels, boxes)]
 
         return results
 
@@ -812,60 +779,60 @@ def batch_resize_masks(
 
     return output
 
-# class PostProcessSegm(nn.Module):
-#     """
-#     Post-processes the mask predictions from the model into a format suitable for
-#     evaluation and visualization.
-#     """
-#     def __init__(self, threshold=0.5):
-#         super().__init__()
-#         self.threshold = threshold
+class PostProcessSegm(nn.Module):
+    """
+    Post-processes the mask predictions from the model into a format suitable for
+    evaluation and visualization.
+    """
+    def __init__(self, threshold=0.5):
+        super().__init__()
+        self.threshold = threshold
 
-#     @torch.no_grad()
-#     def forward(self, results, outputs, target_sizes):
-#         out_logits = outputs["pred_logits"]
-#         assert "pred_masks" in outputs, "Masks not found in model outputs"
-#         out_masks = outputs["pred_masks"]
+    @torch.no_grad()
+    def forward(self, results, outputs, target_sizes):
+        out_logits = outputs["pred_logits"]
+        assert "pred_masks" in outputs, "Masks not found in model outputs"
+        out_masks = outputs["pred_masks"]
 
-#         assert len(out_logits) == len(target_sizes)
-#         assert target_sizes.shape[1] == 2
+        assert len(out_logits) == len(target_sizes)
+        assert target_sizes.shape[1] == 2
         
-#         prob = out_logits.sigmoid()
-#         topk_values, topk_indexes = torch.topk(
-#             prob.view(out_logits.shape[0], -1), 100, dim=1
-#         )
-#         scores = topk_values
-#         topk_boxes = topk_indexes // out_logits.shape[2]
-#         labels = topk_indexes % out_logits.shape[2]
+        prob = out_logits.sigmoid()
+        topk_values, topk_indexes = torch.topk(
+            prob.view(out_logits.shape[0], -1), 100, dim=1
+        )
+        scores = topk_values
+        topk_boxes = topk_indexes // out_logits.shape[2]
+        labels = topk_indexes % out_logits.shape[2]
 
-#         # Extract masks for top-k predictions
-#         batch_size = out_masks.shape[0]
-#         results = []
+        # Extract masks for top-k predictions
+        batch_size = out_masks.shape[0]
+        results = []
 
-#         for i in range(batch_size):
-#             masks = out_masks[i, topk_boxes[i]]  # [num_queries, H/4, W/4]
+        for i in range(batch_size):
+            masks = out_masks[i, topk_boxes[i]]  # [num_queries, H/4, W/4]
 
-#             # Upsample masks to original image size with optimized memory usage
-#             img_h, img_w = target_sizes[i]
-#             # Apply sigmoid before resizing for numerical stability
-#             masks = masks.sigmoid()
-#             masks = batch_resize_masks(
-#                 masks,
-#                 int(img_h.item()),
-#                 int(img_w.item()),
-#                 batch_size=8,  # Smaller batch size for better memory efficiency
-#                 apply_threshold=self.threshold,
-#             )
+            # Upsample masks to original image size with optimized memory usage
+            img_h, img_w = target_sizes[i]
+            # Apply sigmoid before resizing for numerical stability
+            masks = masks.sigmoid()
+            masks = batch_resize_masks(
+                masks,
+                int(img_h.item()),
+                int(img_w.item()),
+                batch_size=8,  # Smaller batch size for better memory efficiency
+                apply_threshold=self.threshold,
+            )
 
-#             results.append(
-#                 {
-#                     "masks": masks,
-#                     "scores": scores[i],
-#                     "labels": labels[i],
-#                 }
-#             )
+            results.append(
+                {
+                    "masks": masks,
+                    "scores": scores[i],
+                    "labels": labels[i],
+                }
+            )
 
-#         return results
+        return results
 
 # class PostProcessPanoptic(nn.Module):
 #     """This class converts the output of the model to the final panoptic result, in the format expected by the
@@ -1094,5 +1061,5 @@ def build_criterion_and_postprocessors(args):
                              ia_bce_loss=args.ia_bce_loss)
     criterion.to(device)
     postprocessors = {'bbox': PostProcess(num_select=args.num_select)}
-    postprocessors['segm'] = PostProcessSegm()
+    # postprocessors['segm'] = PostProcessSegm()
     return criterion, postprocessors
