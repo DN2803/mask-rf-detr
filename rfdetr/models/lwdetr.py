@@ -824,8 +824,8 @@ class PostProcessSegm(nn.Module):
             results.append(
                 {
                     "masks": masks,
-                    "scores": scores[i],
-                    "labels": labels[i],
+                    # "scores": scores[i],
+                    # "labels": labels[i],
                 }
             )
 
