@@ -303,7 +303,7 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, arg
         if "segm" in postprocessors and "masks" in outputs:
             seg_results = postprocessors["segm"](results, outputs, orig_target_sizes)
             results['masks'] = [
-                t["masks"] for t in targets
+                t["masks"] for t in seg_results
             ]  # [num_targets, num_points, 2
             # pass
 

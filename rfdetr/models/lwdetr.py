@@ -1061,5 +1061,5 @@ def build_criterion_and_postprocessors(args):
                              ia_bce_loss=args.ia_bce_loss)
     criterion.to(device)
     postprocessors = {'bbox': PostProcess(num_select=args.num_select)}
-    # postprocessors['segm'] = PostProcessSegm()
+    postprocessors['segm'] = PostProcessSegm()
     return criterion, postprocessors
