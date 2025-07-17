@@ -98,7 +98,7 @@ class RFDETR:
             os.path.join(config.dataset_dir, "train", "_annotations.coco.json"), "r"
         ) as f:
             anns = json.load(f)
-            num_classes = len(anns["categories"])
+            num_classes = len(anns["categories"]) + 1
             class_names = [c["name"] for c in anns["categories"] if c["supercategory"] != "none"]
             self.model.class_names = class_names
 
