@@ -196,12 +196,12 @@ def make_coco_transforms_square_div_64(image_set, resolution, multi_scale=False,
 
     if image_set == 'val':
         return T.Compose([
-            T.SquareResize[resolution],
+            T.SquareResize([resolution]),
             normalize,
         ])
     if image_set == 'test':
         return T.Compose([
-            T.SquareResize[resolution],
+            T.SquareResize([resolution]),
             normalize,
         ])
     if image_set == 'val_speed':
