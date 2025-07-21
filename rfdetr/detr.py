@@ -94,10 +94,24 @@ class RFDETR:
         self.model.export(**kwargs)
 
     def train_from_config(self, config: TrainConfig, **kwargs):
-        with open(
-            os.path.join(config.dataset_dir, "train", "_annotations.coco.json"), "r"
-        ) as f:
-            anns = json.load(f)
+        if config.dataset_file == "coco":
+            config.dataset_dir = os.path.join(config.dataset_dir, "coco")
+            config.dataset_dir = os.path.join(config.dataset_dir, "coco")
+            annotation_path = os.path.join(config.dataset_dir, "annotations", "instances_train2017.json")
+
+            if not os.path.exists(annotation_path):
+                raise ValueError(
+                    "COCO dataset not found. Please ensure the dataset is in the correct format and directory:\n"
+                    "datasets/coco/train2017/, val2017/, and annotations/instances_train2017.json"
+                )
+
+            with open(annotation_path, "r") as f:
+                anns = json.load(f)
+        elif config.dataset_file == "roboflow":
+            with open(
+                os.path.join(config.dataset_dir, "train", "_annotations.coco.json"), "r"
+            ) as f:
+                anns = json.load(f)
             num_classes = len(anns["categories"]) - 1 
             class_names = [c["name"] for c in anns["categories"] if c["supercategory"] != "none"]
             self.model.class_names = class_names
