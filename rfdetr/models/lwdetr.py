@@ -479,60 +479,32 @@ class SetCriterion(nn.Module):
 
 
     def loss_masks(self, outputs, targets, indices, num_boxes):
+        """Compute the losses related to the masks: the focal loss and the dice loss.
+           targets dicts must contain the key "masks" containing a tensor of dim [nb_target_boxes, h, w]
         """
-        Compute the losses related to the masks: the focal loss and the dice loss.
+        assert "pred_masks" in outputs
 
-        Targets dicts must contain the key "masks" containing a tensor of dim [nb_target_boxes, h, w].
-        """
-        if "pred_masks" not in outputs:
-            raise KeyError("No predicted masks found in outputs")
+        src_idx = self._get_src_permutation_idx(indices)
+        tgt_idx = self._get_tgt_permutation_idx(indices)
+        src_masks = outputs["pred_masks"]
+        src_masks = src_masks[src_idx]
+        masks = [t["masks"] for t in targets]
+        # TODO use valid to mask invalid areas due to padding in loss
+        target_masks, valid = nested_tensor_from_tensor_list(masks).decompose()
+        target_masks = target_masks.to(src_masks)
+        target_masks = target_masks[tgt_idx]
 
-        source_idx = self._get_src_permutation_idx(indices)
-        # target_idx = torch.cat([tgt for (_, tgt) in indices])
-
-        # print('source_idx=',source_idx)
-
-        # target_idx = self._get_target_permutation_idx(indices)
-        source_masks = outputs["pred_masks"]
-        # print('source_masks=', source_masks)
-        # print('source_masks=',source_masks.shape)
-        # print('source_idx=',source_idx)
-        source_masks = source_masks[source_idx]
-        # print('source_masks=',source_masks.shape)
-        # masks = [t["masks"] for t in targets]
-        # # TODO use valid to mask invalid areas due to padding in loss
-        # target_masks, valid = nested_tensor_from_tensor_list(masks).decompose()
-        # target_masks = target_masks.to(source_masks)
-        target_masks = torch.cat([nn.functional.interpolate(t['masks'][i][:, None].float(), size=source_masks.shape[-2:], mode="bilinear", align_corners=False
-        ) for t, (_, i) in zip(targets, indices)], dim=0)
-
-
-        # target_masks = target_masks[target_idx]
-
-        # # upsample predictions to the target size
-        # source_masks = nn.functional.interpolate(
-        #     source_masks[:, None], size=target_masks.shape[-2:], mode="bilinear", align_corners=False
-        # )
         # upsample predictions to the target size
-        # target_masks = nn.functional.interpolate(
-        #     target_masks[:, None], size=source_masks.shape[-2:], mode="bilinear", align_corners=False
-        # )
-        source_masks = source_masks.flatten(1)
-        target_masks = target_masks[:, 0].flatten(1)
-        # source_masks = source_masks[:, 0].flatten(1)
-        # target_masks = target_masks.flatten(1)
+        src_masks = interpolate(src_masks[:, None], size=target_masks.shape[-2:],
+                                mode="bilinear", align_corners=False)
+        src_masks = src_masks[:, 0].flatten(1)
 
-        # print('source_masks=', source_masks)
-        # print('target_masks=', target_masks)
-
-        target_masks = target_masks.view(source_masks.shape)
+        target_masks = target_masks.flatten(1)
+        target_masks = target_masks.view(src_masks.shape)
         losses = {
-            "loss_mask": sigmoid_focal_loss(source_masks, target_masks, num_boxes),
-            "loss_dice": dice_loss(source_masks, target_masks, num_boxes),
+            "loss_mask": sigmoid_focal_loss(src_masks, target_masks, num_boxes),
+            "loss_dice": dice_loss(src_masks, target_masks, num_boxes),
         }
-        # print('losses=', losses)
-        # raise 'sdfsdf'
-
         return losses
 
     def _get_src_permutation_idx(self, indices):
